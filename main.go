@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"text/template"
 )
 
@@ -74,7 +75,10 @@ const tmpl = `<!DOCTYPE html>
 	</body>
 </html>`
 
-type handler struct{ reciver bool }
+type handler struct {
+	reciver bool
+	root    string
+}
 
 func red(s string) string {
 	return ansi_red + s + ansi_reset + "\n"
@@ -84,7 +88,7 @@ func blue(s string) string {
 	return ansi_blue + s + ansi_reset + "\n"
 }
 
-func handlePost(r *http.Request) string {
+func (h handler) handlePost(r *http.Request) string {
 	f, fh, err := r.FormFile("file")
 	if err != nil {
 		fmt.Print(red(err.Error()))
@@ -99,7 +103,9 @@ func handlePost(r *http.Request) string {
 	}
 
 	fmt.Printf(blue("[FILE IN] [%s] [%d]"), fh.Filename, fh.Size)
-	os.WriteFile(fh.Filename, buf, 0664)
+	absfp, err := filepath.Abs(h.root)
+
+	os.WriteFile(absfp+"/"+fh.Filename, buf, 0664)
 
 	return fh.Filename
 }
@@ -107,14 +113,18 @@ func handlePost(r *http.Request) string {
 func fillTemplate(tmpl string, data map[string]any) []byte {
 	t := template.Must(template.New("tmpl").Parse(tmpl))
 	var buf bytes.Buffer
-	t.Execute(&buf, data)
+	err := t.Execute(&buf, data)
+	if err != nil {
+		fmt.Print(red(err.Error()))
+		return []byte("SERVER ERROR")
+	}
 	return buf.Bytes()
 }
 
 func (h handler) serveReciver(w http.ResponseWriter, r *http.Request) {
 	fileName := ""
 	if r.Method == "POST" {
-		fileName = handlePost(r)
+		fileName = h.handlePost(r)
 	}
 
 	data := map[string]any{
@@ -125,7 +135,7 @@ func (h handler) serveReciver(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h handler) serveTransceiver(w http.ResponseWriter, r *http.Request) {
-	fs := http.FileServer(http.Dir("."))
+	fs := http.FileServer(http.Dir(h.root))
 	fs.ServeHTTP(w, r)
 }
 
@@ -157,10 +167,46 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
-	port := 8000
-	h := handler{reciver: true}
+	port := "8000"
+	h := handler{reciver: true, root: "."}
 
-	addr := fmt.Sprintf("0.0.0.0:%d", port)
+	for i, arg := range os.Args {
+		switch arg {
+		case "-t", "--transceiver":
+			h.reciver = false
+		case "-r", "--root":
+			if i+1 >= len(os.Args) {
+				fmt.Print(red("no path providen for -r/--root flag"))
+				return
+			}
+			h.root = os.Args[i+1]
+		case "-p", "--port":
+			if i+1 >= len(os.Args) {
+				fmt.Print(red("no path providen for -r/--root flag"))
+				return
+			}
+			port = os.Args[i+1]
+		case "-h", "--help":
+			fmt.Println(`clare: cli util for file sharing
+
+After running clare a web server will be started
+with root as your current working directory.
+
+Files uploaded from the web interface will be written
+to the "root" directory (not /, but your working dir, or the path specified by -r flag).
+
+You can change from reciver by -t flag or by visiting /t path in the web interface.
+
+[OPTIONS]
+-h          show this menu	
+-r [PATH]   change the root directory (the directory which you wish to share)
+-t          change to transceiver (files will be available in the web interface)
+				`)
+			return
+		}
+	}
+
+	addr := fmt.Sprintf("0.0.0.0:%s", port)
 	l, err := net.Listen("tcp", addr)
 	if err != nil {
 		fmt.Println(red(err.Error()))
