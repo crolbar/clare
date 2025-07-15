@@ -211,7 +211,7 @@ func (h handler) printIp(port string) {
 				addr = ip.String() + ":" + port
 			}
 
-			fmt.Printf(blue("Listening on: %s"), addr)
+			fmt.Printf(blue("Listening on: http://%s"), addr)
 
 			q, err := qrcode.New("http://"+addr, qrcode.Medium)
 			if err != nil {
