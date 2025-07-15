@@ -3,10 +3,12 @@ package main
 import (
 	"bytes"
 	"fmt"
+	"github.com/skip2/go-qrcode"
 	"net"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"text/template"
 )
 
@@ -76,8 +78,9 @@ const tmpl = `<!DOCTYPE html>
 </html>`
 
 type handler struct {
-	reciver bool
-	root    string
+	reciver   bool
+	root      string
+	inverseQr bool
 }
 
 func red(s string) string {
@@ -166,14 +169,71 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.serveTransceiver(w, r)
 }
 
+func (h handler) printIp(port string) {
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		panic(err)
+	}
+
+	for _, iface := range ifaces {
+		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+
+		if strings.HasPrefix(iface.Name, "docker") ||
+			strings.HasPrefix(iface.Name, "veth") ||
+			strings.HasPrefix(iface.Name, "br-") {
+			continue
+		}
+
+		addrs, err := iface.Addrs()
+		if err != nil {
+			panic(err)
+		}
+
+		for _, addr := range addrs {
+			var ip net.IP
+			switch v := addr.(type) {
+			case *net.IPNet:
+				ip = v.IP
+			case *net.IPAddr:
+				ip = v.IP
+			}
+
+			if ip == nil || ip.IsLoopback() || ip.To4() == nil {
+				continue
+			}
+
+			var addr string
+			if port == "80" {
+				addr = ip.String()
+			} else {
+				addr = ip.String() + ":" + port
+			}
+
+			fmt.Printf(blue("Listening on: %s"), addr)
+
+			q, err := qrcode.New("http://"+addr, qrcode.Medium)
+			if err != nil {
+				panic(err)
+			}
+
+			fmt.Println(q.ToString(h.inverseQr))
+			return
+		}
+	}
+}
+
 func main() {
 	port := "8000"
-	h := handler{reciver: true, root: "."}
+	h := handler{reciver: true, root: ".", inverseQr: true}
 
 	for i, arg := range os.Args {
 		switch arg {
 		case "-t", "--transceiver":
 			h.reciver = false
+		case "-i", "--inverse":
+			h.inverseQr = false
 		case "-r", "--root":
 			if i+1 >= len(os.Args) {
 				fmt.Print(red("no path providen for -r/--root flag"))
@@ -201,7 +261,7 @@ You can change from reciver by -t flag or by visiting /t path in the web interfa
 -h          show this menu	
 -r [PATH]   change the root directory (the directory which you wish to share)
 -t          change to transceiver (files will be available in the web interface)
-				`)
+-i          don't inverse the qr code, (white background will be present)`)
 			return
 		}
 	}
@@ -213,6 +273,8 @@ You can change from reciver by -t flag or by visiting /t path in the web interfa
 		return
 	}
 	fmt.Printf(blue("Connected to %s"), addr)
+	fmt.Println()
+	h.printIp(port)
 
 	http.Serve(l, &h)
 }
