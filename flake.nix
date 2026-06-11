@@ -2,15 +2,25 @@
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
 
   outputs = inputs: let
-    system = "x86_64-linux";
-    pkgs = import inputs.nixpkgs {inherit system;};
+    systems = ["x86_64-linux" "aarch64-linux"];
+    forEachSystem = inputs.nixpkgs.lib.genAttrs systems;
+    pkgsFor = inputs.nixpkgs.legacyPackages;
   in {
-    devShells.${system}.default = pkgs.mkShell {};
-    packages.${system}.default = pkgs.buildGoModule {
-      pname = "clare";
-      version = "v0.1";
-      src = ./.;
-      vendorHash = "sha256-xGPzODAJOls8RyyYdoEbPqz63i4oex41QsF1HNpmWAc=";
-    };
+    devShells = forEachSystem (system: let
+      pkgs = pkgsFor.${system};
+    in {
+      default = pkgs.mkShell {};
+    });
+
+    packages = forEachSystem (system: let
+      pkgs = pkgsFor.${system};
+    in {
+      default = pkgs.buildGoModule {
+        pname = "clare";
+        version = "v0.1";
+        src = ./.;
+        vendorHash = "sha256-xGPzODAJOls8RyyYdoEbPqz63i4oex41QsF1HNpmWAc=";
+      };
+    });
   };
 }
